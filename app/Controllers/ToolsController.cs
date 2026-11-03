@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
+using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Verademo.Models;
 
@@ -28,6 +30,7 @@ namespace Verademo.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public ActionResult Tools(string host, string fortuneFile)
         {
             if (IsUserLoggedIn() == false)
@@ -50,15 +53,20 @@ namespace Verademo.Controllers
                 return "";
             }
 
-            logger.Info("Pinging: " + host);
+            logger.Info("Pinging: " + WebUtility.UrlEncode(host));
 
             var output = new StringBuilder();
             try
             {
-                // START BAD CODE
+                // Validate and sanitize host input to prevent command injection
+                var sanitizedHost = SanitizeHostInput(host);
+                if (string.IsNullOrEmpty(sanitizedHost))
+                {
+                    return "Invalid host input";
+                }
+
                 var fileName = "bash";
-                var arguments = "-c \"ping -c1 " + host + "\"";
-                // END BAD CODE
+                var arguments = "-c \"ping -c1 " + sanitizedHost + "\"";
 
                 var proc = CreateStdOutProcess(fileName, arguments);
 
@@ -89,10 +97,15 @@ namespace Verademo.Controllers
 
             try
             {
-                // START BAD CODE
+                // Validate and sanitize fortuneFile input to prevent command injection
+                var sanitizedFortuneFile = SanitizeFortuneFileInput(fortuneFile);
+                if (string.IsNullOrEmpty(sanitizedFortuneFile))
+                {
+                    return "Invalid fortune file input";
+                }
+
                 var fileName = "/bin/bash";
-                var arguments = $"-c \"/bin/fortune {fortuneFile}\"";
-                // END BAD CODE
+                var arguments = $"-c \"/bin/fortune {sanitizedFortuneFile}\"";
 
                 var proc = CreateStdOutProcess(fileName, arguments);
 
@@ -126,6 +139,46 @@ namespace Verademo.Controllers
                 }
             };
             return proc;
+        }
+
+        private static string SanitizeHostInput(string host)
+        {
+            if (string.IsNullOrEmpty(host))
+            {
+                return null;
+            }
+
+            // Allow only valid hostname/IP characters: alphanumeric, dots, hyphens, and colons (for IPv6)
+            // Remove any shell metacharacters that could be used for command injection
+            var sanitized = Regex.Replace(host, @"[^a-zA-Z0-9.:\-]", "");
+
+            // Additional validation: ensure it looks like a valid hostname or IP
+            if (string.IsNullOrEmpty(sanitized) || sanitized.Length > 253)
+            {
+                return null;
+            }
+
+            return sanitized;
+        }
+
+        private static string SanitizeFortuneFileInput(string fortuneFile)
+        {
+            if (string.IsNullOrEmpty(fortuneFile))
+            {
+                return null;
+            }
+
+            // Allow only alphanumeric characters, underscores, and hyphens for fortune file names
+            // Remove any shell metacharacters that could be used for command injection
+            var sanitized = Regex.Replace(fortuneFile, @"[^a-zA-Z0-9_\-]", "");
+
+            // Ensure the sanitized input is not empty and has reasonable length
+            if (string.IsNullOrEmpty(sanitized) || sanitized.Length > 100)
+            {
+                return null;
+            }
+
+            return sanitized;
         }
     }
 }
